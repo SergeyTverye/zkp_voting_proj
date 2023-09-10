@@ -1,0 +1,14 @@
+body {
+  padding: 20px;
+  background-color: rgba(108, 121, 122, 0.37);
+}
+
+
+.dia {
+  display: flex;
+  justify-content: center;
+  align-items:center;
+  height: 100vh;
+  padding: 20px;
+}
+
