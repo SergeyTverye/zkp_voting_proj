@@ -12,7 +12,7 @@ const AdminDashboard = () => {
         const fetchSessionData = async () => {
             try {
                 const response = await axios.get('http://localhost:3001/api/admin/session', {
-                    withCredentials: true  // Добавлено разрешение на использование cookies
+                    withCredentials: true
                 });
                 if (response.data.status === 'success') {
                     setRole(response.data.role);
@@ -35,7 +35,7 @@ const AdminDashboard = () => {
     const checkVotes = async () => {
         try {
             const response = await axios.get('http://localhost:3001/api/admin/check_votes', {
-                withCredentials: true  // Добавлено разрешение на использование cookies
+                withCredentials: true
             });
             if (response.data.status === 'success') {
                 alert('All votes are in order.');

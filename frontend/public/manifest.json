@@ -1,6 +1,6 @@
 {
-  "short_name": "React App",
-  "name": "Create React App Sample",
+  "short_name": "ZKP Voting App",
+  "name": "ZKP Voting App Project",
   "icons": [
     {
       "src": "favicon.ico",

@@ -7,7 +7,7 @@ import { Pie, Bar } from 'react-chartjs-2';
 const Results = () => {
     const [results, setResults] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null); //состояние для ошибки
+    const [error, setError] = useState(null);
 
     useEffect(() => {
         axios.get('http://localhost:3001/results')
@@ -16,7 +16,7 @@ const Results = () => {
             })
             .catch(error => {
                 console.error('Error fetching results:', error);
-                setError(error.response?.data?.message || 'An error occurred'); // Установка сообщения об ошибке
+                setError(error.response?.data?.message || 'An error occurred');
             })
             .finally(() => {
                 setLoading(false);
@@ -57,8 +57,8 @@ const Results = () => {
             <Typography variant="h5" align="center">Voting Results</Typography>
             {loading ? (
                 <Typography variant="body1" align="center">Loading...</Typography>
-            ) : error ? ( // Проверка на наличие ошибки
-                <Alert severity="error">{error}</Alert> // Отображение ошибки
+            ) : error ? (
+                <Alert severity="error">{error}</Alert>
             ) : (
                 <>
                     <Typography variant="h6" align="center">Total Votes: {totalVotes}</Typography>

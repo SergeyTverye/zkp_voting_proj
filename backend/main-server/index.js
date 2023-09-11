@@ -1,15 +1,21 @@
+// Importing required modules
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const srp = require('secure-remote-password/server');
 const session = require('express-session');
 const mysql = require('mysql2/promise');
-const keySignLib = require('./keySignLib'); // for vote validator generation
-const jwt = require('jsonwebtoken'); // one time token generation for voting on another server
+const keySignLib = require('./keySignLib');  // For vote validator generation
+const jwt = require('jsonwebtoken');  // For one-time token generation for voting on another server
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 
+// Some settings
+const SERVER_PORT = 3001;
+const NUMBER_OF_POLLING_STATIONS = 4;
+const JWT_SECRET = 'your-secret-key-for-jwt';
 
+// Database connection setup
 const db = mysql.createPool({
     host: 'localhost',
     user: 'root',
@@ -18,24 +24,25 @@ const db = mysql.createPool({
     insecureAuth : true
 });
 
+// Express app setup
 const app = express();
 app.use(bodyParser.json());
 app.use(cors({
-    origin: 'http://localhost:3000',  // frontend url
+    origin: 'http://localhost:3000',  // Frontend URL
     credentials: true
 }));
 app.use(session({
     secret: 'your-secret-key',
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: false }  // true if using HTTPS
+    cookie: { secure: false }  // Set to true if using HTTPS
 }));
 
-// Signup
+// Signup route
 app.post('/signup', async (req, res) => {
     const { username, salt, verifier } = req.body;
     try {
-        // Check if the username (id) exists in the database
+        // Check if the username (ID) exists in the database
         const [rows] = await db.query('SELECT * FROM citizens WHERE id = ?', [username]);
         if (rows.length === 0) {
             return res.status(400).send({ status: 'error', message: 'ID not found' });
@@ -54,7 +61,8 @@ app.post('/signup', async (req, res) => {
             return res.status(400).send({ status: 'error', message: 'User is not over 18' });
         }
         // Store salt and verifier in the database
-        const polling_station = Math.floor(Math.random() * 4) + 1;  // Random number between 1 and 4
+        // Random number between 1 and number of polling stations
+        const polling_station = Math.floor(Math.random() * NUMBER_OF_POLLING_STATIONS) + 1;
         await db.query('UPDATE citizens SET salt = ?, verifier = ?, polling_station = ? WHERE id = ?', [salt, verifier, polling_station, username]);
         res.send({ status: 'ok' });
     } catch (err) {
@@ -63,68 +71,45 @@ app.post('/signup', async (req, res) => {
     }
 });
 
-// Login
+// Login route
 app.post('/login', async (req, res) => {
     const { username, clientPublicEphemeral } = req.body;
-    //console.log("Login: \nUser name: " + username + "\nclientPublicEphemeral: " + clientPublicEphemeral);
     try {
         // Get salt and verifier from the database
         const [rows] = await db.query('SELECT salt, verifier FROM citizens WHERE id = ?', [username]);
         if (rows.length === 0) {
             return res.status(400).send({ status: 'error', message: 'ID not found' });
         }
-
         const { salt, verifier } = rows[0];
-
-        //console.log("Salt : " + salt + "\nVerifier: " + verifier);
-
         const serverEphemeral = srp.generateEphemeral(verifier);
         req.session.clientPublicEphemeral = clientPublicEphemeral;
         req.session.serverEphemeralSecret = serverEphemeral.secret;
-
-        console.log("Saved clientPublicEphemeral : " + req.session.serverEphemeralSecret + "\nSaved serverEphemeral.secret: " + req.session.clientPublicEphemeral);
-
         // Store `serverEphemeral.secret` for later use (e.g., in a session store)
         // Send `salt` and `serverEphemeral.public` to the client
         res.send({ salt, serverPublicEphemeral: serverEphemeral.public });
-
     } catch (err) {
         console.error(err);
         res.status(500).send({ status: 'error', message: 'Internal Server Error' });
     }
 });
 
-
 // Validate client proof and send server proof
 app.post('/login/validate', async (req, res) => {
     const { username, clientSessionProof } = req.body;
-
     try {
-        // Получение данных из базы данных
+        // Retrieving data from the database
         const [rows] = await db.query('SELECT salt, verifier, polling_station FROM citizens WHERE id = ?', [username]);
-
-        // Проверка на наличие данных
+        // Check for data existence
         if (rows.length === 0) {
             return res.status(400).send({ status: 'error', message: 'ID not found' });
         }
-
         const { salt, verifier, polling_station} = rows[0];
-
-        // Получение сохраненных данных из сессии
+        // Retrieve saved data from the session
         const serverSecretEphemeral = req.session.serverEphemeralSecret;
         const clientPublicEphemeral = req.session.clientPublicEphemeral;
-
-        // Принудительное сохранение сессии
-        req.session.save((err) => {
-            if (err) {
-                console.error(err);
-            }
-        });
-
-        // Получение публичного ключа из базы данных (в send отдадим клиенту)
+        // Getting the public key from the database (in send we will send it to the client)
         const [keyRows] = await db.query('SELECT public_key FROM encryption_keys LIMIT 1');
         const publicKey = keyRows[0].public_key;
-
         try {
             const serverSession = srp.deriveSession( // если не упало, то мы авторизованы
                 serverSecretEphemeral,
@@ -134,36 +119,28 @@ app.post('/login/validate', async (req, res) => {
                 verifier,
                 clientSessionProof
             );
-
-            // Устанавливаем флаг в сессии, указывающий на успешную авторизацию
+            // Set a flag in the session indicating successful authorisation
             req.session.isAuthenticated = true;
             req.session.username = username;
-
-            // Получение значения isVotingKeyReceived из базы данных
-
+            // Getting isVotingKeyReceived value from the database
             const [isVotingRows] = await db.query('SELECT isVotingKeyReceived FROM citizens WHERE id = ?', [username]);
             const isVotingKeyReceived = isVotingRows[0].isVotingKeyReceived;
-
-            // Если isVotingKeyReceived равно 1, устанавливаем token в null
+            // If isVotingKeyReceived is 1, set token to null, otherwise generate a one-time token for voting on another server
             let token = null;
             if (isVotingKeyReceived !== 1) {
-                const secret = 'your-secret-key-for-jwt';
-                // Generate a one-time token for voting on another server
-                token = jwt.sign({}, secret, { expiresIn: '1h' });
+                token = jwt.sign({}, JWT_SECRET, { expiresIn: '1h' });
             }
-
             // Generate a validator using keySignLib
             const validator = keySignLib.generateSign();
-
             res.send({ serverSessionProof: serverSession.proof, token, validator, polling_station, publicKey });
             try {
-                // Установка значения isVotingKeyReceived в 1 для данного пользователя
+                // Set isVotingKeyReceived to 1 for this user
                 await db.query('UPDATE citizens SET isVotingKeyReceived = 1 WHERE id = ?', [username]);
             } catch (error) {
                 console.error('Error with setting isVotingKeyReceived:', error);
             }
         } catch (e) {
-            // Устанавливаем флаг в сессии, указывающий на неуспешную авторизацию
+            // Set a flag in the session indicating unsuccessful authorisation
             req.session.isAuthenticated = false;
             console.error('Failed to derive server session', e);
             res.status(400).send({ status: 'error', message: 'Failed to validate session' });
@@ -174,46 +151,34 @@ app.post('/login/validate', async (req, res) => {
     }
 });
 
-// just example
-app.get('/protected', (req, res) => {
-    if (req.session.isAuthenticated) {
-        // Выполняем какие-то действия для авторизованных пользователей
-    } else {
-        // Возвращаем ошибку 401 (Unauthorized)
-        res.status(401).send('Unauthorized');
-    }
-});
-
-async function getOrGenerateKeys() { // либо возьмем из базы, либо сгенерируем новые ключи для RSA для голосов
+// Function to get or generate RSA keys for voting
+async function getOrGenerateKeys() {
     let publicKey, privateKey;
-
-    // Try to get keys from the database
+    // Attempt to retrieve keys from the database
     const [rows] = await db.query('SELECT public_key, private_key FROM encryption_keys LIMIT 1');
     if (rows.length > 0) {
         publicKey = rows[0].public_key;
         privateKey = rows[0].private_key;
     } else {
-        // Generate new key pair if not found
+        // Generate a new key pair if none are found in the database
         const keys = crypto.generateKeyPairSync('rsa', {
             modulusLength: 2048,
         });
         publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' });
         privateKey = keys.privateKey.export({ type: 'pkcs8', format: 'pem' });
-
-        // Save new keys to the database
+        // Save the new keys to the database
         await db.query('INSERT INTO encryption_keys (public_key, private_key) VALUES (?, ?)', [publicKey, privateKey]);
     }
-
     return { publicKey, privateKey };
 }
 
+// Function to decrypt a vote
 async function decryptVote(encryptedVoteBase64) {
     const encryptedVoteBuffer = Buffer.from(encryptedVoteBase64, 'base64');
-
-    // Получение приватного ключа из базы данных
+    // Retrieve the private key from the database
     const [keyRows] = await db.query('SELECT private_key FROM encryption_keys LIMIT 1');
     const privateKeyPem = keyRows[0].private_key;
-
+    // Decrypt the vote
     const decryptedVote = crypto.privateDecrypt(
         {
             key: privateKeyPem,
@@ -226,35 +191,27 @@ async function decryptVote(encryptedVoteBase64) {
     return decryptedVote.toString('utf8');
 }
 
-// Обработчик для получения результатов голосования
+// Endpoint to fetch voting results
 app.get('/results', async (req, res) => {
     try {
-        // Получение всех строк из таблицы votes
+        // Retrieve all rows from the votes table
         const [rows] = await db.query('SELECT * FROM votes');
-
-        // Получение количества строк, где isVotingKeyReceived = 1
+        // Getting the number of rows where isVotingKeyReceived = 1
         const [keyReceivedRows] = await db.query('SELECT COUNT(*) as count FROM citizens WHERE isVotingKeyReceived = 1');
         const keyReceivedCount = keyReceivedRows[0].count;
-
-        // Получение суммарного количества голосов по участкам
+        // Obtaining the total number of votes by polling station
         const [pollingStationRows] = await db.query('SELECT polling_station, COUNT(*) as count FROM citizens WHERE isVotingKeyReceived = 1 GROUP BY polling_station');
-
         const pollingStationCounts = {};
         pollingStationRows.forEach(row => {
             pollingStationCounts[row.polling_station] = row.count;
         });
-
-        // Счетчик для подсчета поврежденных голосов
+        // Counter for counting corrupted votes
         let corruptedVotes = 0;
-
-        // Объект для хранения результатов по участкам
+        // Object for storing the results of the plots
         const pollingStations = {};
-
         let forDemocrats = 0;
         let forRepublicans = 0;
-
-        console.log("получение расшифрованных голосов:")
-        // Расшифровка каждого голоса
+        // Decoding, verification and counting of votes
         for (const row of rows) {
             const decryptedVote = await decryptVote(row.vote);
             const check = keySignLib.checkSign(row.validator);
@@ -266,14 +223,14 @@ app.get('/results', async (req, res) => {
             } else if (decryptedVote === 'Republicans') {
                 forRepublicans++;
             }
-            // Инициализация объекта для нового участка
+            // Initialise the object for the new site
             if (!pollingStations[row.polling_station]) {
                 pollingStations[row.polling_station] = {
                     forDemocrats: 0,
                     forRepublicans: 0
                 };
             }
-            // Подсчет голосов для участка
+            // Counting of votes for a polling station
             if (decryptedVote === 'Democrats') {
                 pollingStations[row.polling_station].forDemocrats++;
             } else if (decryptedVote === 'Republicans') {
@@ -281,91 +238,59 @@ app.get('/results', async (req, res) => {
             }
         }
 
-        // Проверка количества голосов
+        // Check the number of votes
         const totalVotes = forDemocrats + forRepublicans;
         if (keyReceivedCount > totalVotes) {
             return res.status(400).json({ status: 'error', message: 'Mismatch in vote counts' });
         }
-        // Проверка количества голосов по участкам
+        // Check the number of votes by precinct
         for (const [pollingStation, counts] of Object.entries(pollingStations)) {
             const totalStationVotes = counts.forDemocrats + counts.forRepublicans;
             if (pollingStationCounts[pollingStation] < totalStationVotes) {
                 return res.status(400).json({ status: 'error', message: `Mismatch in vote counts for polling station ${pollingStation}` });
             }
         }
-
-        console.log({ pollingStations, forDemocrats, forRepublicans, corruptedVotes });
-        // Возвращение расшифрованных голосов
+        // Return full voting results
         res.send({ pollingStations, forDemocrats, forRepublicans, corruptedVotes });
-        //res.json({ status: 'success', decryptedVotes });
     } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ status: 'error', message: 'Internal Server Error' });
     }
 });
 
-
-// Signup
+// Endpoint for admin signup
 app.post('/api/admin/signup', async (req, res) => {
     try {
         const { username, password, role, polling_station } = req.body;
-
-        // Вывод входных данных в консоль
-        console.log("Received signup request:", { username, role, polling_station });
-
-        // Хэширование пароля
+        // Hash the password
         const passwordHash = await bcrypt.hash(password, 10);
-        console.log("Password hash generated:", passwordHash);
-
-        // Вставка данных в базу
+        // Insert data into the database
         const [rows] = await db.query('INSERT INTO admin_users (username, password_hash, role, polling_station) VALUES (?, ?, ?, ?)', [username, passwordHash, role, polling_station]);
-
-        // Вывод информации о вставленной строке
-        console.log("Inserted row:", rows);
-
-        // Отправка успешного ответа
+        // Send a successful response
         res.json({ status: 'success' });
     } catch (error) {
-        // Вывод ошибки в консоль
+        // Log and send the error to the client
         console.error("Error during signup:", error);
-
-        // Отправка ошибки клиенту
         res.status(500).json({ status: 'error', message: 'Internal Server Error' });
     }
 });
 
 
-// Login
+// Endpoint for admin login
 app.post('/api/admin/login', async (req, res) => {
     try {
         const { username, password } = req.body;
         const [users] = await db.query('SELECT * FROM admin_users WHERE username = ?', [username]);
         const user = users[0];
-
-        if (!user) {
-            return res.status(400).json({ status: 'error', message: 'User not found' });
-        }
-
+        if (!user) { return res.status(400).json({ status: 'error', message: 'User not found' }); }
         const match = await bcrypt.compare(password, user.password_hash);
-
-        if (!match) {
-            return res.status(400).json({ status: 'error', message: 'Invalid password' });
-        }
-
-        // Сохранение данных в сессии
+        if (!match) { return res.status(400).json({ status: 'error', message: 'Invalid password' }); }
+        // Save data in session
         req.session.userId = user.id;
         req.session.role = user.role;
         req.session.polling_station = user.polling_station;
-
-        console.log("login \n req.session.userId  " + req.session.userId + "\nreq.session.role " + req.session.role + "\nreq.session.polling_station " + req.session.polling_station)
-
-        // Принудительное сохранение сессии
-        req.session.save((err) => {
-            if (err) {
-                console.error(err);
-            }
-        });
-
+        // Force session save
+        req.session.save((err) => {if (err) {console.error(err); } });
         res.json({ status: 'success', role: user.role, polling_station: user.polling_station });
     } catch (error) {
         console.error('An error occurred:', error);
@@ -373,25 +298,17 @@ app.post('/api/admin/login', async (req, res) => {
     }
 });
 
-// для стейкхолдера возвращает данные по участку
+// Endpoint to return polling station data for a stakeholder
 app.get('/api/admin/session', async (req, res) => {
-    console.log(" get session\n req.session.userId " + req.session.userId + "\nreq.session.role " + req.session.role + "\nreq.session.polling_station " + req.session.polling_station)
-
-    if (!req.session.userId) {
-        return res.status(401).json({ status: 'error', message: 'Not authenticated' });
-    }
-
+    if (!req.session.userId) {return res.status(401).json({ status: 'error', message: 'Not authenticated' }); }
     let theoreticalVotes = 0;
     let actualVotes = 0;
-
     if (req.session.role === 'stakeholder') {
         const [theoreticalRows] = await db.query('SELECT COUNT(*) as count FROM citizens WHERE polling_station = ? AND isVotingKeyReceived = 1', [req.session.polling_station]);
         theoreticalVotes = theoreticalRows[0].count;
-
         const [actualRows] = await db.query('SELECT COUNT(*) as count FROM votes WHERE polling_station = ?', [req.session.polling_station]);
         actualVotes = actualRows[0].count;
     }
-
     res.json({
         status: 'success',
         role: req.session.role,
@@ -401,43 +318,37 @@ app.get('/api/admin/session', async (req, res) => {
     });
 });
 
-
+// Endpoint to check votes for a stakeholder
 app.get('/api/admin/check_votes', async (req, res) => {
     if (!req.session.userId || req.session.role !== 'stakeholder') {
         return res.status(401).json({ status: 'error', message: 'Not authenticated or not a stakeholder' });
     }
-
     try {
         const pollingStation = req.session.polling_station;
-
-        // Получение всех строк из таблицы votes для данного участка
+        // Retrieve all rows from the votes table for this polling station
         const [rows] = await db.query('SELECT * FROM votes WHERE polling_station = ?', [pollingStation]);
 
         let corruptedVotes = 0;
         let forDemocrats = 0;
         let forRepublicans = 0;
-
-        // Расшифровка каждого голоса
+        // Decrypt each vote and check the validator and vote value
         for (const row of rows) {
             const decryptedVote = await decryptVote(row.vote);
             const check = keySignLib.checkSign(row.validator);
-
             if (!check || (decryptedVote !== 'Democrats' && decryptedVote !== 'Republicans')) {
                 corruptedVotes++;
                 continue;
             }
-
             if (decryptedVote === 'Democrats') {
                 forDemocrats++;
             } else if (decryptedVote === 'Republicans') {
                 forRepublicans++;
             }
         }
-
+        //If there is even one corrupted voice, we return an error
         if (corruptedVotes > 0) {
             return res.status(400).json({ status: 'error', message: 'Some votes are corrupted' });
         }
-
         res.json({ status: 'success', forDemocrats, forRepublicans });
     } catch (error) {
         console.error('Error:', error);
@@ -445,16 +356,11 @@ app.get('/api/admin/check_votes', async (req, res) => {
     }
 });
 
-
-
 // Initialize server
 (async () => {
-    const { publicKey, privateKey } = await getOrGenerateKeys();
-    // console.log('Public Key:', publicKey);
-    // console.log('Private Key:', privateKey);
-
+    await getOrGenerateKeys();
     // Now start the server
-    app.listen(3001, () => {
+    app.listen(SERVER_PORT, () => {
         console.log('Server running on http://localhost:3001/');
     });
 })();

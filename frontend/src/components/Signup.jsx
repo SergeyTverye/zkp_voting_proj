@@ -47,7 +47,7 @@ function Signup() {
                 variant="outlined"
                 margin="normal"
                 fullWidth
-                label="Username"
+                label="National ID"
                 onChange={(e) => setUsername(e.target.value)}
             />
             <TextField

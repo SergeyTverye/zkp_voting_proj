@@ -19,7 +19,7 @@ const AdminLogin = () => {
     const handleSubmit = async () => {
         try {
             const response = await axios.post('http://localhost:3001/api/admin/login', formData, {
-                withCredentials: true  // разрешение на использование cookies
+                withCredentials: true
             });
             if (response.data.status === 'success') {
                 alert('Successfully logged in');

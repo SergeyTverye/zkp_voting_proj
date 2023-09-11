@@ -12,7 +12,7 @@ function Login() {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState(null);
-    const navigate = useNavigate(); // Инициализация navigate
+    const navigate = useNavigate();
 
     const handleLogin = async () => {
         const clientEphemeral = srp.generateEphemeral();
@@ -27,9 +27,8 @@ function Login() {
                     withCredentials: true
                 }
             );
+            // Step 1
             const { salt, serverPublicEphemeral } = data;
-            console.log("Step 1:", salt, serverPublicEphemeral);
-
             const privateKey = srp.derivePrivateKey(salt, username, password);
             const clientSession = srp.deriveSession(
                 clientEphemeral.secret,
@@ -38,7 +37,7 @@ function Login() {
                 username,
                 privateKey
             );
-
+            // Step 2
             let { data: validateData } = await axios.post('http://localhost:3001/login/validate',
                 {
                     username,
@@ -52,16 +51,13 @@ function Login() {
             try {
                 srp.verifySession(clientEphemeral.public, clientSession, validateData.serverSessionProof);
                 alert('Login successful');
-                // Сохранение токена и валидатора в MobX store
+                // Saving token and validator to MobX store
                 AuthStore.setToken(validateData.token);
                 AuthStore.setValidator(validateData.validator);
-                console.log("save polling_station", validateData.polling_station);
                 AuthStore.setPollingStation(validateData.polling_station);
-                console.log("save publicKey", validateData.publicKey)
                 AuthStore.setPublicKey(validateData.publicKey);
-
-                if (validateData.token === null) navigate('/results'); // если пользователь уже голосовал, то перенаправление на /results
-                else navigate('/vote'); // Перенаправление на /vote
+                if (validateData.token === null) navigate('/results'); // if the user has already voted, redirect to /results
+                else navigate('/vote'); // Otherwise redirects to /vote
 
             } catch (error) {
                 console.error('Failed to verify session', error);
@@ -84,7 +80,7 @@ function Login() {
                 variant="outlined"
                 margin="normal"
                 fullWidth
-                label="Username"
+                label="National ID"
                 onChange={(e) => setUsername(e.target.value)}
             />
             <TextField
