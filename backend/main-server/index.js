@@ -356,6 +356,51 @@ app.get('/api/admin/check_votes', async (req, res) => {
     }
 });
 
+app.post('/api/admin/restart_voting', async (req, res) => {
+    try {
+        // Deleting all rows from tables
+        await db.query('DELETE FROM citizens');
+        await db.query('DELETE FROM votes');
+        await db.query('DELETE FROM used_tokens');
+        await db.query('DELETE FROM encryption_keys');
+
+        // Inserting initial data into the citizens table
+        const insertQuery = `
+            INSERT INTO citizens (id, first_name, surname, date_of_birth, salt, verifier, polling_station, isVotingKeyReceived)
+            VALUES ?`;
+
+        const values = [
+            [123456789, 'John', 'Doe', '1980-01-01', '', '', 0, 0],
+            [987654321, 'Jane', 'Doe', '1985-02-02', '', '', 0, 0],
+            [456789123, 'Emily', 'Smith', '1990-03-03', '', '', 0, 0],
+            [456734545, 'Van', 'Hellsing', '1990-03-03', '', '', 0, 0],
+            [111111111, 'Alice', 'Johnson', '1970-04-04', '', '', 0, 0],
+            [222222222, 'Bob', 'Williams', '1975-05-05', '', '', 0, 0],
+            [333333333, 'Charlie', 'Brown', '1982-06-06', '', '', 0, 0],
+            [444444444, 'David', 'Lee', '1987-07-07', '', '', 0, 0],
+            [555555555, 'Eve', 'Clark', '1992-08-08', '', '', 0, 0],
+            [666666666, 'Frank', 'Lewis', '1995-09-09', '', '', 0, 0],
+            [777777777, 'Grace', 'Walker', '1998-10-10', '', '', 0, 0],
+            [888888888, 'Helen', 'Hall', '2000-11-11', '', '', 0, 0],
+            [999999999, 'Ivy', 'Green', '2002-12-12', '', '', 0, 0],
+            [121212121, 'Jack', 'Adams', '2003-01-13', '', '', 0, 0],
+            [131313131, 'Karen', 'Baker', '2004-02-14', '', '', 0, 0],
+            [141414141, 'Leo', 'Carter', '2005-03-15', '', '', 0, 0],
+            [151515151, 'Mia', 'Davis', '2006-04-16', '', '', 0, 0],
+            [161616161, 'Nina', 'Evans', '2007-05-17', '', '', 0, 0],
+            [171717171, 'Oscar', 'Foster', '2008-06-18', '', '', 0, 0],
+            [181818181, 'Paul', 'Garcia', '2009-07-19', '', '', 0, 0]
+        ];
+
+        await db.query(insertQuery, [values]);
+
+        res.json({ status: 'success', message: 'Voting restarted successfully' });
+    } catch (error) {
+        console.error('Error:', error);
+        res.status(500).json({ status: 'error', message: 'Internal Server Error' });
+    }
+});
+
 // Initialize server
 (async () => {
     await getOrGenerateKeys();

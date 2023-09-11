@@ -45,11 +45,27 @@ const AdminDashboard = () => {
         }
     };
 
+    const restartVoting = async () => {
+        try {
+            const response = await axios.post('http://localhost:3001/api/admin/restart_voting', {}, {
+                withCredentials: true
+            });
+            if (response.data.status === 'success') {
+                alert('Voting restarted successfully.');
+            }
+        } catch (error) {
+            alert('Failed to restart voting.');
+        }
+    };
+
     return (
         <Container component="main" maxWidth="md">
             <Typography variant="h5">Admin Dashboard</Typography>
             {role === 'admin' ? (
-                <Typography variant="body1">Admin Content</Typography>
+                <>
+                    <Typography variant="body1">Admin Content</Typography>
+                    <Button variant="contained" color="secondary" onClick={restartVoting}>Restart Voting</Button>
+                </>
             ) : (
                 role && (
                     <>
